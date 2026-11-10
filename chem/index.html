@@ -376,7 +376,8 @@ const TRK=(()=>{let me=null,q=[];try{me=JSON.parse(localStorage.getItem('chemstu
   watch(lid,v){const k=C+lid;if(sent.has('w'+k)||!v.duration)return;if(v.currentTime/v.duration>=.8){sent.add('w'+k);log(C,lid,'','watch',null,{pct:Math.round(100*v.currentTime/v.duration)})}},
   quiz(lid,ok){const k=C+lid;if(sent.has('q'+k))return;sent.add('q'+k);log(C,lid,'','quiz',ok?1:0,{})},
   lab(x,mis){log(x.c,x.l,x.id,'lab',Math.max(0,100-mis*10),{mistakes:mis})},
-  report(x,ans,n){log(x.c,x.l,x.id,'report',n,{a:ans})}}})();
+  async report(x,ans,n){if(!me)throw new Error('سجّلي الدخول أولًا');const a={p_course:x.c,p_lesson:x.l,p_item:x.id,p_kind:'report',p_score:n,p_data:{a:ans}};
+   try{await rpc('chem_log',{...a,p_token:me.token});return true}catch(e){if(/الجلسة/.test(e.message)){logout();throw e}if(/غير مفعّل|Failed to fetch|NetworkError|Load failed/i.test(e.message)){q.push(a);saveQ();return false}throw e}}}})();
 function studentDlg(after){const d=$('sdlg'),b=$('sbody');b.textContent='';
  if(TRK.me){b.append(el('p','','مسجّلة باسم: '+TRK.me.name+' — '+TRK.me.class));const me=el('p','muted','');b.append(me);
   rpc('chem_me',{p_token:TRK.me.token}).then(r=>{if(r)me.textContent='شاهدتِ '+r.watched+' درسًا، وأنجزتِ '+r.labs+' تجربة، وأرسلتِ '+r.reports+' تقريرًا.'}).catch(()=>{});
@@ -446,9 +447,15 @@ async function tClass(code,tab){const b=tBody();b.append(el('p','muted','جار�
  const course=r.class.course||'c1',S=r.students.map(s=>({...s,sm:summarize(s,course)}));b.textContent='';
  const back=el('button','btn','← الفصول');back.type='button';back.onclick=tHome;
  const hd=el('div','thead');hd.append(back,el('h5','',r.class.name+' · '+CN[course]+' · رمز الفصل: '+r.class.code));b.append(hd);
- const tabs=el('div','filt');let cur=tab||'st';[['st','الطالبات'],['ls','الدروس'],['ex','التجارب']].forEach(([k,t])=>{const bt=document.createElement('button');bt.type='button';bt.textContent=t;bt.setAttribute('aria-pressed',k===cur?'true':'false');bt.onclick=()=>tClass(code,k);tabs.append(bt)});b.append(tabs);
+ const tabs=el('div','filt');let cur=tab||'st';const RP=[];S.forEach(s=>(s.events||[]).forEach(e=>{if(e.k==='report')RP.push([s,e])}));RP.sort((a,b)=>a[1].t<b[1].t?1:-1);
+ [['st','الطالبات'],['rp','📥 التقارير المرسلة ('+RP.length+')'],['ls','الدروس'],['ex','التجارب']].forEach(([k,t])=>{const bt=document.createElement('button');bt.type='button';bt.textContent=t;bt.setAttribute('aria-pressed',k===cur?'true':'false');bt.onclick=()=>tClass(code,k);tabs.append(bt)});b.append(tabs);
  const n=S.length;const kp=el('div','kpis');const avg=f=>n?Math.round(S.reduce((a,s)=>a+f(s),0)/n):0;
  [[n,'طالبة مسجّلة'],[avg(s=>s.sm.total?100*s.sm.wc/s.sm.total:0)+'%','متوسط إنجاز الدروس'],[S.reduce((a,s)=>a+s.sm.labs,0),'تجربة منجزة'],[S.reduce((a,s)=>a+s.sm.reps,0),'تقرير مُرسل']].forEach(([v,t])=>{const k=el('div','kpi');k.append(el('b','',String(v)),el('span','',t));kp.append(k)});b.append(kp);
+ if(cur==='rp'){if(!RP.length){b.append(el('p','muted','لم تُرسل أي طالبة تقريرًا بعد. ترسل الطالبة تقريرها من تبويب «التقرير» في التجربة بزر «📤 إرسال التقرير للمعلمة».'));return}
+  const tw=el('div','tw'),tb=document.createElement('table');tb.className='res';tb.innerHTML='<tr><th>الطالبة</th><th>التجربة</th><th>الدرس</th><th>الإجابات</th><th>وقت الإرسال</th><th></th></tr>';
+  RP.forEach(([s,e])=>{const x=EXP.find(q=>q.id===e.i);const tr=document.createElement('tr');[s.name,x?x.n:e.i,'\u2066'+e.l+'\u2069',String(e.s||0),fmtD(e.t)].forEach(v=>{const td=document.createElement('td');fx(td,v);tr.append(td)});
+   const td=document.createElement('td');const o=el('button','btn pri','عرض التقرير');o.type='button';o.onclick=()=>tReport(r,s,e,code,'rp');td.append(o);tr.append(td);tb.append(tr)});
+  tw.append(tb);b.append(tw);return}
  let head,rows;
  if(cur==='st'){head=['الطالبة','دروس شوهدت','الأسئلة السريعة','تجارب منجزة','تقارير مُرسلة','آخر دخول'];
   rows=S.map(s=>[s.name,s.sm.wc+' / '+s.sm.total,s.sm.qn?(s.sm.qok+' / '+s.sm.qn):'—',String(s.sm.labs),String(s.sm.reps),fmtD(s.last)])}
@@ -471,11 +478,22 @@ function tStudent(r,s,course,code){const b=tBody();const back=el('button','btn',
   return [KN[e.k]||e.k,CN[e.c]||e.c,x?x.n:('\u2066'+e.l+'\u2069 '+(L?L.title:'')),e.k==='quiz'?(+e.s?'✓ صحيحة':'✗ خاطئة'):e.k==='lab'?('الأخطاء: '+((e.d&&e.d.mistakes)||0)):e.k==='watch'?((e.d&&e.d.pct)||'')+'%':e.k==='report'?('أجابت '+(e.s||0)+' سؤالًا'):'',fmtD(e.t)]});
  const tw=el('div','tw'),tb=document.createElement('table');tb.className='res';const tr=document.createElement('tr');head.forEach(h=>{const th=document.createElement('th');th.textContent=h;tr.append(th)});tb.append(tr);
  rows.forEach(r0=>{const tr=document.createElement('tr');r0.forEach(v=>{const td=document.createElement('td');fx(td,String(v));tr.append(td)});tb.append(tr)});tw.append(tb);b.append(tw);
- const reps=(s.events||[]).filter(e=>e.k==='report');if(reps.length){b.append(el('h5','','إجابات تقارير التجارب'));
-  reps.slice().reverse().forEach(e=>{const x=EXP.find(q=>q.id===e.i);if(!x)return;const box=el('div','qa');box.append(el('p','qq',x.n+' — '+fmtD(e.t)));const qs=x.qa.slice();if(x.inq)qs.push(['الاستقصاء: '+x.inq[0],x.inq[1]]);
-   Object.entries((e.d&&e.d.a)||{}).forEach(([i,a])=>{if(!a)return;const q=qs[+i];box.append(el('p','',(+i+1)+'. '+(q?q[0]:'')),el('p','ans','إجابتها: '+a))});b.append(box)})}
+ const reps=(s.events||[]).filter(e=>e.k==='report');if(reps.length){b.append(el('h5','','تقارير التجارب المرسلة ('+reps.length+')'));const ls=el('div','xlist');
+  reps.slice().reverse().forEach(e=>{const x=EXP.find(q=>q.id===e.i);if(!x)return;const bt=document.createElement('button');bt.type='button';bt.className='xitem';bt.append(el('span','',x.n),el('span','muted',fmtD(e.t)),el('span','go','عرض التقرير ←'));bt.onclick=()=>tReport(r,s,e,code,null);ls.append(bt)});b.append(ls)}
  const ac=el('div','acts');const pr=el('button','btn pri','طباعة تقرير الطالبة 🖨️');pr.type='button';pr.onclick=()=>printTbl('تقرير الطالبة: '+s.name+' — '+r.class.name,head,rows);ac.append(pr);
  const rm=el('button','btn','حذف الطالبة');rm.type='button';rm.onclick=async()=>{if(!rm.dataset.sure){rm.dataset.sure=1;rm.textContent='اضغطي مرة أخرى لتأكيد حذف الطالبة وبياناتها';return}await rpc('chem_remove_student',{p_tok:TK.token,p_code:code,p_name:s.name});tClass(code)};ac.append(rm);b.append(ac)}
+function tReport(r,s,e,code,from){const b=tBody();const x=EXP.find(q=>q.id===e.i);
+ const back=el('button','btn',from==='rp'?'← التقارير المرسلة':'← '+s.name);back.type='button';back.onclick=()=>from==='rp'?tClass(code,'rp'):tStudent(r,s,r.class.course||'c1',code);b.append(back);
+ if(!x){b.append(el('p','serr','التجربة غير موجودة'));return}
+ const cap='تقرير تجربة: '+x.n;b.append(el('h5','',cap),el('p','muted','الطالبة: '+s.name+' · '+r.class.name+' · '+CN[x.c]+' · الدرس \u2066'+x.l+'\u2069 · أُرسل: '+fmtD(e.t)));
+ const qs=x.qa.slice();if(x.inq)qs.push(['الاستقصاء: '+x.inq[0],x.inq[1]]);const A=(e.d&&e.d.a)||{};
+ if(x.tbl){b.append(el('h5','','جدول النتائج (المرجعي)'));b.append(tableOf(x.tbl))}
+ b.append(el('h5','','إجابات الطالبة ('+Object.keys(A).length+' من '+qs.length+')'));
+ qs.forEach(([q,m],i)=>{const box=el('div','qa');box.append(el('p','qq',(i+1)+'. '+q));const a=A[i];
+  const pa=el('p','',(a?'':'— لم تُجب —'));if(a){const bb=document.createElement('b');bb.textContent='إجابتها: ';pa.append(bb,document.createTextNode(a))}pa.style.whiteSpace='pre-wrap';
+  const pm=el('p','ans');const mb=document.createElement('b');mb.textContent='الإجابة النموذجية: ';pm.append(mb,document.createTextNode(m));box.append(pa,pm);b.append(box)});
+ const ac=el('div','acts');const pr=el('button','btn pri','طباعة التقرير 🖨️');pr.type='button';
+ pr.onclick=()=>printTbl(cap+' — '+s.name+' — '+r.class.name,['#','السؤال','إجابة الطالبة','الإجابة النموذجية'],qs.map(([q,m],i)=>[String(i+1),q,A[i]||'—',m]));ac.append(pr);b.append(ac);b.scrollTop=0;$('tdlg').scrollTop=0}
 function dlCSV(rows,name){const esc=v=>'"'+String(v).replace(/"/g,'""')+'"';const t='﻿'+rows.map(r=>r.map(esc).join(',')).join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv;charset=utf-8'}));a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function printTbl(title,head,rows){const P=$('printArea');P.textContent='';const hd=el('div','ph');hd.append(el('div','','منصة الكيمياء — الثانوية الثامنة بجدة'),el('div','',new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')));P.append(hd,el('h1','',title));
  const tb=document.createElement('table');const tr=document.createElement('tr');head.forEach(h=>{const th=document.createElement('th');th.textContent=h;tr.append(th)});tb.append(tr);rows.forEach(r=>{const tr=document.createElement('tr');r.forEach(v=>{const td=document.createElement('td');fx(td,String(v));tr.append(td)});tb.append(tr)});P.append(tb);
@@ -524,7 +542,7 @@ function renderX(){const x=curX,b=$('xbody');b.textContent='';
   const all=el('button','btn','أظهري التقرير المحلول كاملًا');all.type='button';all.onclick=()=>{const show=ansEls.some(([an])=>an.hidden);ansEls.forEach(([an,tg])=>{an.hidden=!show;tg.textContent=show?'أخفي الإجابة':'أظهري الإجابة النموذجية'});all.textContent=show?'أخفي الإجابات':'أظهري التقرير المحلول كاملًا'};
   const p1=el('button','btn pri','طباعة التقرير المحلول 🖨️');p1.type='button';p1.onclick=()=>printX(true);
   const p2=el('button','btn','طباعة نموذج تقرير للطالبة');p2.type='button';p2.onclick=()=>printX(false);
-  const snd=el('button','btn pri','📤 إرسال التقرير للمعلمة');snd.type='button';snd.onclick=()=>{const go=()=>{const ans={};let n=0;Object.entries(st.a||{}).forEach(([i,v])=>{if(v&&v.trim()){ans[i]=v.trim().slice(0,1500);n++}});if(!n){snd.textContent='اكتبي إجاباتك أولًا ثم أرسلي';return}TRK.report(x,ans,n);snd.textContent='✓ أُرسل التقرير ('+n+' إجابات)';snd.disabled=true};TRK.me?go():studentDlg(go)};
+  const snd=el('button','btn pri','📤 إرسال التقرير للمعلمة');snd.type='button';snd.onclick=()=>{const go=()=>{const ans={};let n=0;Object.entries(st.a||{}).forEach(([i,v])=>{if(v&&v.trim()){ans[i]=v.trim().slice(0,1500);n++}});if(!n){snd.textContent='اكتبي إجاباتك أولًا ثم أرسلي';return}snd.disabled=true;snd.textContent='جارٍ الإرسال…';TRK.report(x,ans,n).then(ok=>{snd.textContent=ok?'✓ وصل التقرير للمعلمة ('+n+' إجابات)':'⏳ لا يوجد اتصال الآن — سيُرسل التقرير تلقائيًا لاحقًا'}).catch(e=>{snd.disabled=false;snd.textContent='تعذّر الإرسال: '+e.message+' — اضغطي للمحاولة مجددًا'})};TRK.me?go():studentDlg(go)};
   a.append(snd,all,p1,p2);b.append(a);
  }
  b.append(el('p','src','المصدر: ملف التجارب العملية لمقررات الكيمياء — إعداد المعلمة تهاني البكر (الثانوية العاشرة)، مع مراجعة الإجابات وتدقيقها لهذه المنصة.'))}
