@@ -393,28 +393,56 @@ function studentDlg(after){const d=$('sdlg'),b=$('sbody');b.textContent='';
 
 /* teacher dashboard */
 const CN={c1:'كيمياء 1',c2:'كيمياء 2-1',c4:'كيمياء 2-2',c3:'كيمياء 3'};
-let TK=null;try{TK=sessionStorage.getItem('chemtk')}catch(e){}
+let TK=null;try{TK=JSON.parse(localStorage.getItem('chemt')||'null')}catch(e){}
+function setTK(t){TK=t;try{t?localStorage.setItem('chemt',JSON.stringify(t)):localStorage.removeItem('chemt')}catch(e){}}
 function fmtD(t){if(!t)return '—';const d=new Date(t);return d.toLocaleDateString('ar-SA-u-ca-gregory-nu-latn',{day:'numeric',month:'short'})+' '+d.toLocaleTimeString('ar-SA-u-nu-latn',{hour:'numeric',minute:'2-digit',hour12:true})}
 function teacherDlg(){const d=$('tdlg');d.showModal();tHome()}
 function tBody(){const b=$('tbody');b.textContent='';return b}
-function tLogin(msg){const b=tBody();const f=document.createElement('form');f.className='sform';const w=el('label','');w.append(el('span','','كلمة مرور المعلمة'));const i=document.createElement('input');i.type='password';i.required=true;i.autocomplete='current-password';w.append(i);
- const er=el('p','serr',msg||'');const go=el('button','btn pri','دخول');go.type='submit';f.append(w,er,go);
- f.onsubmit=async e=>{e.preventDefault();go.disabled=true;try{await rpc('chem_teacher_classes',{p_key:i.value});TK=i.value;try{sessionStorage.setItem('chemtk',TK)}catch(x){}tHome()}catch(x){er.textContent=x.message}finally{go.disabled=false}};b.append(f);setTimeout(()=>i.focus(),50)}
-async function tHome(){if(!TK)return tLogin();const b=tBody();b.append(el('p','muted','جارٍ التحميل…'));let cls;try{cls=await rpc('chem_teacher_classes',{p_key:TK})}catch(x){TK=null;return tLogin(x.message)}
- b.textContent='';b.append(el('h5','','فصولي'));
+function tFail(x){if(/الجلسة|موقوف/.test(x.message)){setTK(null);tLogin(x.message);return true}return false}
+function tForm(fields,btn,onsub,msg){const f=document.createElement('form');f.className='sform';const I={};
+ fields.forEach(([k,lab,at])=>{const w=el('label','');w.append(el('span','',lab));const i=document.createElement('input');Object.assign(i,{required:true},at||{});w.append(i);f.append(w);I[k]=i});
+ const er=el('p','serr',msg||'');const go=el('button','btn pri',btn);go.type='submit';f.append(er,go);
+ f.onsubmit=async e=>{e.preventDefault();er.textContent='';go.disabled=true;try{await onsub(I)}catch(x){er.textContent=x.message}finally{go.disabled=false}};return [f,I]}
+function tLogin(msg,reg){const b=tBody();
+ const tabs=el('div','filt');const t1=el('button','','دخول المعلمة'),t2=el('button','','معلمة جديدة؟ أنشئي حسابك');t1.type=t2.type='button';t1.setAttribute('aria-pressed',reg?'false':'true');t2.setAttribute('aria-pressed',reg?'true':'false');t1.onclick=()=>tLogin('',0);t2.onclick=()=>tLogin('',1);tabs.append(t1,t2);b.append(tabs);
+ const U=['u','اسم المستخدم (بالإنجليزية)',{dir:'ltr',autocomplete:'username',maxLength:30,autocapitalize:'none',placeholder:'مثال: mona.chem'}];
+ if(!reg){const [f,I]=tForm([U,['p','كلمة المرور',{type:'password',autocomplete:'current-password'}]],'دخول',async I=>{setTK(await rpc('chem_t_login',{p_user:I.u.value,p_pw:I.p.value}));tHome()},msg);
+  b.append(f,el('p','muted','نسيتِ كلمة المرور؟ تواصلي مع مشرفة المنصة لإعادة تعيينها.'));setTimeout(()=>I.u.focus(),50);return}
+ const [f,I]=tForm([['n','اسم المعلمة',{maxLength:60,autocomplete:'name'}],['s','المدرسة',{maxLength:80,placeholder:'مثال: الثانوية الثامنة بجدة'}],U,
+  ['p','كلمة المرور (6 أحرف أو أرقام على الأقل)',{type:'password',autocomplete:'new-password',minLength:6}],['p2','تأكيد كلمة المرور',{type:'password',autocomplete:'new-password',minLength:6}]],'إنشاء الحساب',
+  async I=>{if(I.p.value!==I.p2.value)throw new Error('كلمتا المرور غير متطابقتين');setTK(await rpc('chem_t_register',{p_user:I.u.value,p_pw:I.p.value,p_name:I.n.value,p_school:I.s.value}));tHome()},msg);
+ b.append(el('p','muted','لكل معلمة حسابها: ترين فصولك وطالباتك فقط، ولا ترى غيرك بياناتك.'),f);setTimeout(()=>I.n.focus(),50)}
+async function tHome(){if(!TK)return tLogin();const b=tBody();b.append(el('p','muted','جارٍ التحميل…'));let r;try{r=await rpc('chem_teacher_classes',{p_tok:TK.token})}catch(x){if(!tFail(x)){b.textContent='';b.append(el('p','serr',x.message))}return}
+ const me=r.me,cls=r.classes;b.textContent='';
+ const hd=el('div','thead');hd.append(el('div','',''));hd.firstChild.append(el('b','','أ. '+me.name),el('div','muted',me.school+' · '+me.user));b.append(hd);
+ b.append(el('h5','','فصولي'));
  if(!cls.length)b.append(el('p','muted','لا توجد فصول بعد. أنشئي فصلًا وأعطي طالباته رمزه.'));
  const ls=el('div','xlist');cls.forEach(c=>{const bt=document.createElement('button');bt.type='button';bt.className='xitem';const cd=el('span','ln');cd.textContent=c.code;bt.append(cd,el('span','',c.name+' — '+(CN[c.course]||'')),el('span','go',c.students+' طالبة ←'));bt.onclick=()=>tClass(c.code);ls.append(bt)});b.append(ls);
  b.append(el('h5','','إنشاء فصل جديد'));const f=document.createElement('form');f.className='sform row';const n=document.createElement('input');n.placeholder='اسم الفصل، مثل: ثاني ثانوي 3';n.required=true;n.setAttribute('aria-label','اسم الفصل');
  const s=document.createElement('select');s.setAttribute('aria-label','المقرر');['c1','c2','c4','c3'].forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=CN[k];s.append(o)});
  const go=el('button','btn pri','إنشاء');go.type='submit';const er=el('p','serr','');f.append(n,s,go);b.append(f,er);
- f.onsubmit=async e=>{e.preventDefault();try{await rpc('chem_create_class',{p_key:TK,p_name:n.value,p_course:s.value});tHome()}catch(x){er.textContent=x.message}};
- const lo=el('button','btn','خروج المعلمة');lo.type='button';lo.style.marginTop='16px';lo.onclick=()=>{TK=null;try{sessionStorage.removeItem('chemtk')}catch(e){}tLogin()};b.append(lo)}
+ f.onsubmit=async e=>{e.preventDefault();try{await rpc('chem_create_class',{p_tok:TK.token,p_name:n.value,p_course:s.value});tHome()}catch(x){if(!tFail(x))er.textContent=x.message}};
+ const ac=el('div','acts');ac.style.marginTop='16px';
+ if(me.admin){const ad=el('button','btn','👩‍🏫 المعلمات المسجّلات');ad.type='button';ad.onclick=tAdmin;ac.append(ad)}
+ const pw=el('button','btn','تغيير كلمة المرور');pw.type='button';pw.onclick=tPw;
+ const lo=el('button','btn','خروج المعلمة');lo.type='button';lo.onclick=()=>{setTK(null);tLogin()};ac.append(pw,lo);b.append(ac)}
+function tPw(){const b=tBody();const back=el('button','btn','← فصولي');back.type='button';back.onclick=tHome;b.append(back,el('h5','','تغيير كلمة المرور'));
+ const [f,I]=tForm([['o','كلمة المرور الحالية',{type:'password',autocomplete:'current-password'}],['p','كلمة المرور الجديدة',{type:'password',autocomplete:'new-password',minLength:6}],['p2','تأكيد الجديدة',{type:'password',autocomplete:'new-password',minLength:6}]],'حفظ',
+  async I=>{if(I.p.value!==I.p2.value)throw new Error('كلمتا المرور غير متطابقتين');setTK(await rpc('chem_t_password',{p_tok:TK.token,p_old:I.o.value,p_new:I.p.value}));tHome()});b.append(f)}
+async function tAdmin(){const b=tBody();b.append(el('p','muted','جارٍ التحميل…'));let L;try{L=await rpc('chem_admin_teachers',{p_tok:TK.token})}catch(x){if(!tFail(x)){b.textContent='';b.append(el('p','serr',x.message))}return}
+ b.textContent='';const back=el('button','btn','← فصولي');back.type='button';back.onclick=tHome;b.append(back,el('h5','','المعلمات المسجّلات ('+L.length+')'));
+ const k=el('div','kpis');[[L.length,'معلمة'],[L.reduce((a,t)=>a+t.classes,0),'فصل'],[L.reduce((a,t)=>a+t.students,0),'طالبة']].forEach(([v,t])=>{const d=el('div','kpi');d.append(el('b','',String(v)),el('span','',t));k.append(d)});b.append(k);
+ const tw=el('div','tw');const tb=document.createElement('table');tb.className='res';tb.innerHTML='<thead><tr><th>المعلمة</th><th>المدرسة</th><th>اسم المستخدم</th><th>الفصول</th><th>الطالبات</th><th>آخر دخول</th><th>الحالة</th><th></th></tr></thead>';
+ const bd=document.createElement('tbody');L.forEach(t=>{const tr=document.createElement('tr');[t.name+(t.admin?' (المشرفة)':''),t.school,t.user,t.classes,t.students,fmtD(t.last),t.active?'مفعّل':'موقوف'].forEach((v,i)=>{const td=document.createElement('td');td.textContent=v;if(i==2)td.dir='ltr';tr.append(td)});
+  const td=document.createElement('td');if(!t.admin){const s=el('button','btn',t.active?'إيقاف':'تفعيل');s.type='button';s.onclick=async()=>{try{await rpc('chem_admin_set',{p_tok:TK.token,p_user:t.user,p_active:!t.active,p_new_pw:null});tAdmin()}catch(x){alertX(x)}};
+   const r=el('button','btn','كلمة مرور جديدة');r.type='button';r.onclick=async()=>{const np=Math.random().toString(36).slice(2,8)+Math.floor(10+Math.random()*89);try{await rpc('chem_admin_set',{p_tok:TK.token,p_user:t.user,p_active:null,p_new_pw:np});r.replaceWith(el('b','','كلمة المرور الجديدة: '+np))}catch(x){alertX(x)}};td.append(s,r)}tr.append(td);bd.append(tr)});
+ tb.append(bd);tw.append(tb);b.append(tw);function alertX(x){if(!tFail(x))b.append(el('p','serr',x.message))}}
 function summarize(st,course){const ev=st.events||[];const W=new Set(),Q={},L=new Set(),R={};
  ev.forEach(e=>{if(e.k==='watch')W.add(e.c+e.l);if(e.k==='quiz'){Q[e.c+e.l]=Q[e.c+e.l]||e.s}if(e.k==='lab')L.add(e.i);if(e.k==='report')R[e.i]=e});
  const qn=Object.keys(Q).length,qok=Object.values(Q).filter(v=>+v===1).length;
  const total=COURSES[course]?COURSES[course].lessons.length:0;
  return {w:W.size,wc:[...W].filter(k=>k.startsWith(course)).length,total,qn,qok,labs:L.size,reps:Object.keys(R).length,R,W,Q,L}}
-async function tClass(code,tab){const b=tBody();b.append(el('p','muted','جارٍ تحميل التقرير…'));let r;try{r=await rpc('chem_teacher_report',{p_key:TK,p_code:code})}catch(x){b.textContent='';b.append(el('p','serr',x.message));return}
+async function tClass(code,tab){const b=tBody();b.append(el('p','muted','جارٍ تحميل التقرير…'));let r;try{r=await rpc('chem_teacher_report',{p_tok:TK.token,p_code:code})}catch(x){if(tFail(x))return;b.textContent='';b.append(el('p','serr',x.message));return}
  const course=r.class.course||'c1',S=r.students.map(s=>({...s,sm:summarize(s,course)}));b.textContent='';
  const back=el('button','btn','← الفصول');back.type='button';back.onclick=tHome;
  const hd=el('div','thead');hd.append(back,el('h5','',r.class.name+' · '+CN[course]+' · رمز الفصل: '+r.class.code));b.append(hd);
@@ -433,7 +461,7 @@ async function tClass(code,tab){const b=tBody();b.append(el('p','muted','جار�
  tw.append(tb);b.append(tw);if(!n)b.append(el('p','muted','لم تسجّل أي طالبة بعد. أعطي الطالبات رمز الفصل: '+r.class.code));
  const ac=el('div','acts');const csv=el('button','btn','⬇️ تصدير Excel (CSV)');csv.type='button';csv.onclick=()=>dlCSV([head].concat(rows),r.class.name+'-'+({st:'الطالبات',ls:'الدروس',ex:'التجارب'})[cur]+'.csv');
  const pr=el('button','btn pri','طباعة التقرير 🖨️');pr.type='button';pr.onclick=()=>printTbl(r.class.name+' · '+CN[course]+' — تقرير '+({st:'الطالبات',ls:'الدروس',ex:'التجارب'})[cur],head,rows);
- const del=el('button','btn','حذف الفصل');del.type='button';del.onclick=async()=>{if(!confirmDel(del))return;await rpc('chem_delete_class',{p_key:TK,p_code:code});tHome()};
+ const del=el('button','btn','حذف الفصل');del.type='button';del.onclick=async()=>{if(!confirmDel(del))return;await rpc('chem_delete_class',{p_tok:TK.token,p_code:code});tHome()};
  ac.append(pr,csv,del);b.append(ac)}
 function confirmDel(btn){if(btn.dataset.sure)return true;btn.dataset.sure=1;btn.textContent='اضغطي مرة أخرى لتأكيد حذف الفصل وكل بياناته';return false}
 function tStudent(r,s,course,code){const b=tBody();const back=el('button','btn','← تقرير الفصل');back.type='button';back.onclick=()=>tClass(code);b.append(back);
@@ -447,7 +475,7 @@ function tStudent(r,s,course,code){const b=tBody();const back=el('button','btn',
   reps.slice().reverse().forEach(e=>{const x=EXP.find(q=>q.id===e.i);if(!x)return;const box=el('div','qa');box.append(el('p','qq',x.n+' — '+fmtD(e.t)));const qs=x.qa.slice();if(x.inq)qs.push(['الاستقصاء: '+x.inq[0],x.inq[1]]);
    Object.entries((e.d&&e.d.a)||{}).forEach(([i,a])=>{if(!a)return;const q=qs[+i];box.append(el('p','',(+i+1)+'. '+(q?q[0]:'')),el('p','ans','إجابتها: '+a))});b.append(box)})}
  const ac=el('div','acts');const pr=el('button','btn pri','طباعة تقرير الطالبة 🖨️');pr.type='button';pr.onclick=()=>printTbl('تقرير الطالبة: '+s.name+' — '+r.class.name,head,rows);ac.append(pr);
- const rm=el('button','btn','حذف الطالبة');rm.type='button';rm.onclick=async()=>{if(!rm.dataset.sure){rm.dataset.sure=1;rm.textContent='اضغطي مرة أخرى لتأكيد حذف الطالبة وبياناتها';return}await rpc('chem_remove_student',{p_key:TK,p_code:code,p_name:s.name});tClass(code)};ac.append(rm);b.append(ac)}
+ const rm=el('button','btn','حذف الطالبة');rm.type='button';rm.onclick=async()=>{if(!rm.dataset.sure){rm.dataset.sure=1;rm.textContent='اضغطي مرة أخرى لتأكيد حذف الطالبة وبياناتها';return}await rpc('chem_remove_student',{p_tok:TK.token,p_code:code,p_name:s.name});tClass(code)};ac.append(rm);b.append(ac)}
 function dlCSV(rows,name){const esc=v=>'"'+String(v).replace(/"/g,'""')+'"';const t='﻿'+rows.map(r=>r.map(esc).join(',')).join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv;charset=utf-8'}));a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function printTbl(title,head,rows){const P=$('printArea');P.textContent='';const hd=el('div','ph');hd.append(el('div','','منصة الكيمياء — الثانوية الثامنة بجدة'),el('div','',new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')));P.append(hd,el('h1','',title));
  const tb=document.createElement('table');const tr=document.createElement('tr');head.forEach(h=>{const th=document.createElement('th');th.textContent=h;tr.append(th)});tb.append(tr);rows.forEach(r=>{const tr=document.createElement('tr');r.forEach(v=>{const td=document.createElement('td');fx(td,String(v));tr.append(td)});tb.append(tr)});P.append(tb);
